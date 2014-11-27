@@ -1,0 +1,7 @@
+# ignore build file
+*.o
+tcprelay
+
+# ignore Qt Creator project file
+*.pro
+*.pro.user
