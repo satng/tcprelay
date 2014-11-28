@@ -31,7 +31,9 @@
 #include <netdb.h>
 #include <ev.h>
 #include "log.h"
+#include "mem.h"
 
+// 缓冲区大小
 #define BUF_SIZE 65536
 
 struct
@@ -63,7 +65,6 @@ static void local_read_cb(EV_P_ ev_io *w, int revents);
 static void local_write_cb(EV_P_ ev_io *w, int revents);
 static void remote_read_cb(EV_P_ ev_io *w, int revents);
 static void remote_write_cb(EV_P_ ev_io *w, int revents);
-static void cleanup(struct ev_loop *loop, conncb_t *conn);
 static bool setnonblock(int sock);
 
 
@@ -133,6 +134,13 @@ int main(int argc, char **argv)
 		return 2;
 	}
 
+	// 初始化内存池
+	if (!mem_init(sizeof(conncb_t)))
+	{
+		LOG("memory pool error");
+		return 3;
+	}
+
 	// 初始化 ev
 	struct ev_loop *loop = EV_DEFAULT;
 	ev_signal w_sigint;
@@ -146,8 +154,7 @@ int main(int argc, char **argv)
 	LOG("Starting tcprelay...");
 	ev_run(loop, 0);
 
-	// 清理
-	close(sock_listen);
+	// 退出
 	LOG("Exit");
 
 	return 0;
@@ -156,49 +163,62 @@ int main(int argc, char **argv)
 static void sigint_cb(EV_P_ ev_signal *w, int revents)
 {
 	LOG("SIGINT");
-	ev_break(loop, EVBREAK_ALL);
+	ev_break(EV_A_ EVBREAK_ALL);
 }
 
 static void accept_cb(EV_P_ ev_io *w, int revents)
 {
-	conncb_t *conn = (conncb_t *)malloc(sizeof(conncb_t));
-	conn->sock_local = accept(w->fd, NULL, NULL);
-	if (conn->sock_local == -1)
+	LOG("local connection established");
+
+	conncb_t *conn = (conncb_t *)mem_new();
+	if (conn == NULL)
 	{
-		ERR("connect");
-		free(conn);
+		return;
+	}
+	conn->sock_local = accept(w->fd, NULL, NULL);
+	if (conn->sock_local < 0)
+	{
+		ERR("accept");
+		mem_delete(conn);
 		return;
 	}
 	if (!setnonblock(conn->sock_local))
 	{
-		free(conn);
+		close(conn->sock_local);
+		mem_delete(conn);
 		return;
 	}
 	conn->sock_remote = socket(remote.family, SOCK_STREAM, IPPROTO_TCP);
 	if (conn->sock_remote < 0)
 	{
 		ERR("socket");
-		free(conn);
+		close(conn->sock_local);
+		mem_delete(conn);
 		return;
 	}
 	if (!setnonblock(conn->sock_remote))
 	{
-		free(conn);
+		close(conn->sock_local);
+		close(conn->sock_remote);
+		mem_delete(conn);
 		return;
 	}
 	static ev_io w_connect;
+	bzero(&w_connect, sizeof(ev_io));
 	ev_io_init(&w_connect, connect_cb, conn->sock_remote, EV_WRITE);
 	w_connect.data = (void *)conn;
-	ev_io_start(loop, &w_connect);
+	ev_io_start(EV_A_ &w_connect);
 	connect(conn->sock_remote, &remote.addr, remote.addrlen);
 }
 
 static void connect_cb(EV_P_ ev_io *w, int revents)
 {
 	LOG("remote connection established");
-	ev_io_stop(loop, w);
 
-	conncb_t *conn = (conncb_t *)w->data;
+	conncb_t *conn = (conncb_t *)(w->data);
+
+	ev_io_stop(EV_A_ w);
+
 	ev_io_init(&conn->w_local_read, local_read_cb, conn->sock_local, EV_READ);
 	ev_io_init(&conn->w_local_write, local_write_cb, conn->sock_local, EV_WRITE);
 	ev_io_init(&conn->w_remote_read, remote_read_cb, conn->sock_remote, EV_READ);
@@ -208,86 +228,99 @@ static void connect_cb(EV_P_ ev_io *w, int revents)
 	conn->w_remote_read.data = (void *)conn;
 	conn->w_remote_write.data = (void *)conn;
 
-	ev_io_start(loop, &conn->w_local_read);
-	ev_io_start(loop, &conn->w_remote_read);
+	ev_io_start(EV_A_ &conn->w_local_read);
+	ev_io_start(EV_A_ &conn->w_remote_read);
 }
 
 static void local_read_cb(EV_P_ ev_io *w, int revents)
 {
-	ev_io_stop(loop, w);
+	conncb_t *conn = (conncb_t *)(w->data);
 
-	conncb_t *conn = (conncb_t *)w->data;
-	conn->local_nbytes = recv(w->fd, conn->buf, BUF_SIZE, 0);
+	ev_io_stop(EV_A_ w);
+
+	conn->local_nbytes = recv(conn->sock_local, conn->buf, BUF_SIZE, 0);
 	if (conn->local_nbytes <=0)
 	{
 		if (conn->local_nbytes < 0)
 		{
 			ERR("recv");
 		}
-		cleanup(loop, conn);
+		ev_io_stop(EV_A_ &conn->w_local_write);
+		ev_io_stop(EV_A_ &conn->w_remote_read);
+		ev_io_stop(EV_A_ &conn->w_remote_write);
+		close(conn->sock_local);
+		close(conn->sock_remote);
+		mem_delete(conn);
 		return;
 	}
-	ev_io_start(loop, &conn->w_remote_write);
+	ev_io_start(EV_A_ &conn->w_remote_write);
 }
 
 static void remote_write_cb(EV_P_ ev_io *w, int revents)
 {
-	ev_io_stop(loop, w);
+	conncb_t *conn = (conncb_t *)(w->data);
 
-	conncb_t *conn = (conncb_t *)w->data;
-	ssize_t n = send(w->fd, conn->buf, conn->local_nbytes, MSG_NOSIGNAL);
-	if (n == -1)
+	ev_io_stop(EV_A_ w);
+
+	ssize_t n = send(conn->sock_remote, conn->buf, conn->local_nbytes, MSG_NOSIGNAL);
+	if (n < 0)
 	{
 		ERR("send");
-		cleanup(loop, conn);
+		ev_io_stop(EV_A_ &conn->w_local_read);
+		ev_io_stop(EV_A_ &conn->w_local_write);
+		ev_io_stop(EV_A_ &conn->w_remote_read);
+		close(conn->sock_local);
+		close(conn->sock_remote);
+		mem_delete(conn);
 		return;
 	}
-	ev_io_start(loop, &conn->w_local_read);
+	ev_io_start(EV_A_ &conn->w_local_read);
 }
 
 static void remote_read_cb(EV_P_ ev_io *w, int revents)
 {
-	ev_io_stop(loop, w);
+	conncb_t *conn = (conncb_t *)(w->data);
 
-	conncb_t *conn = (conncb_t *)w->data;
-	conn->remote_nbytes = recv(w->fd, conn->buf, BUF_SIZE, 0);
+	ev_io_stop(EV_A_ w);
+
+	conn->remote_nbytes = recv(conn->sock_remote, conn->buf, BUF_SIZE, 0);
 	if (conn->remote_nbytes <=0)
 	{
 		if (conn->remote_nbytes < 0)
 		{
 			ERR("recv");
 		}
-		cleanup(loop, conn);
+		ev_io_stop(EV_A_ &conn->w_local_read);
+		ev_io_stop(EV_A_ &conn->w_local_write);
+		ev_io_stop(EV_A_ &conn->w_remote_write);
+		close(conn->sock_local);
+		close(conn->sock_remote);
+		mem_delete(conn);
 		return;
 	}
-	ev_io_start(loop, &conn->w_local_write);
+	ev_io_start(EV_A_ &conn->w_local_write);
 }
 
 
 static void local_write_cb(EV_P_ ev_io *w, int revents)
 {
-	ev_io_stop(loop, w);
-
 	conncb_t *conn = (conncb_t *)w->data;
-	ssize_t n = send(w->fd, conn->buf, conn->remote_nbytes, MSG_NOSIGNAL);
-	if (n == -1)
+
+	ev_io_stop(EV_A_ w);
+
+	ssize_t n = send(conn->sock_local, conn->buf, conn->remote_nbytes, MSG_NOSIGNAL);
+	if (n < 0)
 	{
 		ERR("send");
-		cleanup(loop, conn);
+		ev_io_stop(EV_A_ &conn->w_local_read);
+		ev_io_stop(EV_A_ &conn->w_remote_read);
+		ev_io_stop(EV_A_ &conn->w_remote_write);
+		close(conn->sock_local);
+		close(conn->sock_remote);
+		mem_delete(conn);
 		return;
 	}
-	ev_io_start(loop, &conn->w_remote_read);
-}
-
-static void cleanup(struct ev_loop *loop, conncb_t *conn)
-{
-	ev_io_stop(loop, &conn->w_local_read);
-	ev_io_stop(loop, &conn->w_local_write);
-	ev_io_stop(loop, &conn->w_remote_read);
-	ev_io_stop(loop, &conn->w_remote_write);
-	close(conn->sock_local);
-	close(conn->sock_remote);
-	free(conn);
+	ev_io_start(EV_A_ &conn->w_remote_read);
 }
 
 static bool setnonblock(int sock)

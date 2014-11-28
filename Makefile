@@ -21,7 +21,7 @@ CXX = g++
 LD = gcc
 
 CFLAGS = -pipe -W -Wall -Wno-unused-parameter -std=gnu99
-CFLAGS += -O2 -fno-strict-aliasing
+CFLAGS += -O2 -fno-strict-aliasing -DNDEBUG
 LDFLAGS = -Wl,-O1
 LIBS = -lev
 
@@ -34,11 +34,14 @@ clean:
 
 distclean: clean
 
-tcprelay: tcprelay.o log.o
+tcprelay: tcprelay.o log.o mem.o
 	$(LD)  $(LDFLAGS)  -o $@  $^ $(LIBS)
 
-tcprelay.o: tcprelay.c log.h
+tcprelay.o: tcprelay.c log.h mem.h
 	$(CC)  $(CFLAGS)  -c  -o $@  $<
 
 log.o: log.c log.h
+	$(CC)  $(CFLAGS)  -c  -o $@  $<
+
+mem.o: mem.c mem.h
 	$(CC)  $(CFLAGS)  -c  -o $@  $<
