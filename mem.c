@@ -21,7 +21,7 @@
 #include <assert.h>
 #include "mem.h"
 
-// // 内存池的块数
+// 内存池的预分配的块数
 #define MEM_POOL_SIZE 32
 
 static void *mem_pool = NULL;

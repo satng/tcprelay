@@ -203,11 +203,17 @@ static void accept_cb(EV_P_ ev_io *w, int revents)
 		mem_delete(conn);
 		return;
 	}
-	static ev_io w_connect;
-	bzero(&w_connect, sizeof(ev_io));
-	ev_io_init(&w_connect, connect_cb, conn->sock_remote, EV_WRITE);
-	w_connect.data = (void *)conn;
-	ev_io_start(EV_A_ &w_connect);
+	ev_io *w_connect = (ev_io *)malloc(sizeof(ev_io));
+	if (w_connect == NULL)
+	{
+		close(conn->sock_local);
+		close(conn->sock_remote);
+		mem_delete(conn);
+		return;
+	}
+	ev_io_init(w_connect, connect_cb, conn->sock_remote, EV_WRITE);
+	w_connect->data = (void *)conn;
+	ev_io_start(EV_A_ w_connect);
 	connect(conn->sock_remote, &remote.addr, remote.addrlen);
 }
 
@@ -218,6 +224,7 @@ static void connect_cb(EV_P_ ev_io *w, int revents)
 	conncb_t *conn = (conncb_t *)(w->data);
 
 	ev_io_stop(EV_A_ w);
+	free(w);
 
 	ev_io_init(&conn->w_local_read, local_read_cb, conn->sock_local, EV_READ);
 	ev_io_init(&conn->w_local_write, local_write_cb, conn->sock_local, EV_WRITE);
