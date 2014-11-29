@@ -38,7 +38,7 @@
 
 struct
 {
-	struct sockaddr addr;
+	char addr[64];
 	socklen_t addrlen;
 	int family;
 } local, remote;
@@ -89,7 +89,7 @@ int main(int argc, char **argv)
 		LOG("wrong local_host/local_port");
 		return 1;
 	}
-	local.addr = *(res->ai_addr);
+	memcpy(local.addr, res->ai_addr, res->ai_addrlen);
 	local.addrlen = res->ai_addrlen;
 	local.family = res->ai_family;
 	freeaddrinfo(res);
@@ -101,7 +101,7 @@ int main(int argc, char **argv)
 		LOG("wrong remote_host /remote_port");
 		return 1;
 	}
-	remote.addr = *(res->ai_addr);
+	memcpy(remote.addr, res->ai_addr, res->ai_addrlen);
 	remote.addrlen = res->ai_addrlen;
 	remote.family = res->ai_family;
 	freeaddrinfo(res);
@@ -123,7 +123,7 @@ int main(int argc, char **argv)
 		ERR("setsockopt SO_REUSEADDR");
 		return 2;
 	}
-	if (bind(sock_listen, (struct sockaddr *)&local.addr, local.addrlen) != 0)
+	if (bind(sock_listen, (struct sockaddr *)local.addr, local.addrlen) != 0)
 	{
 		ERR("bind");
 		return 2;
@@ -214,7 +214,7 @@ static void accept_cb(EV_P_ ev_io *w, int revents)
 	ev_io_init(w_connect, connect_cb, conn->sock_remote, EV_WRITE);
 	w_connect->data = (void *)conn;
 	ev_io_start(EV_A_ w_connect);
-	connect(conn->sock_remote, &remote.addr, remote.addrlen);
+	connect(conn->sock_remote, (struct sockaddr *)remote.addr, remote.addrlen);
 }
 
 static void connect_cb(EV_P_ ev_io *w, int revents)
