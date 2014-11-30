@@ -71,7 +71,7 @@ bool mem_init(size_t *block_size, size_t *block_count, size_t pool_count)
 	void *ptr = pool;
 	for (size_t i = 0; i < pool_count; i++)
 	{
-		block[i].state = (void **)malloc(block_count[i]);
+		block[i].state = (void **)malloc(sizeof(void *) * block_count[i]);
 		if (block[i].state == NULL)
 		{
 			free(pool);
@@ -129,5 +129,6 @@ void mem_delete(void *ptr)
 			}
 		}
 	}
+	free(ptr);
 	return;
 }
