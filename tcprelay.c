@@ -135,7 +135,9 @@ int main(int argc, char **argv)
 	}
 
 	// 初始化内存池
-	if (!mem_init(sizeof(conncb_t)))
+	size_t block_size[2] = { sizeof(ev_io), sizeof(conncb_t) };
+	size_t block_count[2] = { 64, 32 };
+	if (!mem_init(block_size, block_count, 2))
 	{
 		LOG("memory pool error");
 		return 3;
@@ -170,7 +172,7 @@ static void accept_cb(EV_P_ ev_io *w, int revents)
 {
 	LOG("local connection established");
 
-	conncb_t *conn = (conncb_t *)mem_new();
+	conncb_t *conn = (conncb_t *)mem_new(sizeof(conncb_t));
 	if (conn == NULL)
 	{
 		return;
@@ -203,7 +205,7 @@ static void accept_cb(EV_P_ ev_io *w, int revents)
 		mem_delete(conn);
 		return;
 	}
-	ev_io *w_connect = (ev_io *)malloc(sizeof(ev_io));
+	ev_io *w_connect = (ev_io *)mem_new(sizeof(ev_io));
 	if (w_connect == NULL)
 	{
 		close(conn->sock_local);
@@ -224,7 +226,7 @@ static void connect_cb(EV_P_ ev_io *w, int revents)
 	conncb_t *conn = (conncb_t *)(w->data);
 
 	ev_io_stop(EV_A_ w);
-	free(w);
+	mem_delete(w);
 
 	ev_io_init(&conn->w_local_read, local_read_cb, conn->sock_local, EV_READ);
 	ev_io_init(&conn->w_local_write, local_write_cb, conn->sock_local, EV_WRITE);

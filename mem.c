@@ -18,71 +18,115 @@
  */
 
 #include <stdlib.h>
-#include <assert.h>
 #include "mem.h"
 
-// 内存池的预分配的块数
-#define MEM_POOL_SIZE 32
+// 对齐的字节数
+#define ALIGN (sizeof(long))
 
-static void *mem_pool = NULL;
-static size_t block_size;
-static size_t block_used;
-static void *block_state[MEM_POOL_SIZE];
+// 内存池最大个数
+#define MEM_POOL_MAX 8
 
-bool mem_init(size_t block)
+static size_t g_pool_count;
+static struct
 {
-	if (block <= 0)
+	size_t size;
+	size_t count;
+	size_t used;
+	void **state;
+} block[MEM_POOL_MAX];
+
+bool mem_init(size_t *block_size, size_t *block_count, size_t pool_count)
+{
+	if ((pool_count <= 0) || (pool_count > MEM_POOL_MAX))
 	{
 		return false;
 	}
-	mem_pool = (void *)malloc(block * MEM_POOL_SIZE);
-	if (mem_pool == NULL)
+	// 对 block_size 按升序排序
+	for (size_t i = 1; i < pool_count; i++)
+	{
+		register size_t size = block_size[i];
+		register size_t count = block_count[i];
+		ssize_t j;
+		for (j = (ssize_t)i - 1; (j >= 0) && (block_size[j] > size); j--)
+		{
+			block_size[j + 1] = block_size[j];
+			block_count[j + 1] = block_count[j];
+		}
+		block_size[j + 1] = size;
+		block_count[j + 1] = count;
+	}
+	g_pool_count = pool_count;
+	size_t total = 0;
+	for (size_t i = 0; i < pool_count; i++)
+	{
+		block[i].size = (block_size[i] + ALIGN - 1) & ~(ALIGN - 1);
+		block[i].count = block_count[i];
+		total += block[i].size * block[i].count;
+	}
+	void *pool = (void *)malloc(total);
+	if (pool == NULL)
 	{
 		return false;
 	}
-	block_size = block;
-	block_used = 0;
-	for (size_t i = 0; i < MEM_POOL_SIZE; i++)
+	void *ptr = pool;
+	for (size_t i = 0; i < pool_count; i++)
 	{
-		block_state[i] = mem_pool + block_size * i;
+		block[i].state = (void **)malloc(block_count[i]);
+		if (block[i].state == NULL)
+		{
+			free(pool);
+			for (size_t j = 0; j < i; j++)
+			{
+				free(block[i].state);
+			}
+			return false;
+		}
+		for (size_t j = 0; j < block[i].count; j++)
+		{
+			block[i].state[j] = ptr;
+			ptr += block[i].size;
+		}
 	}
 	return true;
 }
 
-void *mem_new(void)
+void *mem_new(size_t size)
 {
-	assert(mem_pool != NULL);
-
-	if (block_used < MEM_POOL_SIZE)
+	if (g_pool_count == 0)
 	{
-		return block_state[block_used++];
+		return NULL;
 	}
-	else
+	// 找一个块足够大，且有空闲块的地址池
+	for (size_t i = 0; i < g_pool_count; i++)
 	{
-		return malloc(block_size);
+		if ((block[i].size >= size) && (block[i].used < block[i].count))
+		{
+			return block[i].state[block[i].used++];
+		}
 	}
+	return malloc(size);
 }
 
 void mem_delete(void *ptr)
 {
-	assert(mem_pool != NULL);
-
-	if ((ptr < mem_pool) || (ptr > mem_pool + block_size * (MEM_POOL_SIZE - 1)))
+	if (g_pool_count == 0)
 	{
-		free(ptr);
 		return;
 	}
 
-	for (size_t i = 0; i < block_used; i++)
+	for (size_t i = 0; i < g_pool_count; i++)
 	{
-		if (block_state[i] == ptr)
+		for (size_t j = 0; j < block[i].used; j++)
 		{
-			for (size_t j = i; j < block_used - 1; j++)
+			if (block[i].state[j] == ptr)
 			{
-				block_state[j] = block_state[j + 1];
+				for (size_t k = j; k < block[i].used - 1; k++)
+				{
+					block[i].state[k] = block[i].state[k + 1];
+				}
+				block[i].state[--block[i].used] = ptr;
+				return;
 			}
-			block_state[--block_used] = ptr;
-			return;
 		}
 	}
 	return;

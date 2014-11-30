@@ -23,8 +23,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-extern bool mem_init(size_t block);
-extern void *mem_new(void);
+extern bool mem_init(size_t *block_size, size_t *block_count, size_t pool_count);
+extern void *mem_new(size_t size);
 extern void mem_delete(void *ptr);
 
 #endif // MEM_H
