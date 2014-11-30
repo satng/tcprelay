@@ -47,14 +47,14 @@ typedef struct
 {
 	int sock_local;
 	int sock_remote;
-	ssize_t local_nbytes;
-	ssize_t remote_nbytes;
+	ssize_t tx_bytes;
+	ssize_t rx_bytes;
 	ev_io w_local_read;
 	ev_io w_local_write;
 	ev_io w_remote_read;
 	ev_io w_remote_write;
-	char in_buf[BUF_SIZE];
-	char out_buf[BUF_SIZE];
+	char rx_buf[BUF_SIZE];
+	char tx_buf[BUF_SIZE];
 } conncb_t;
 
 
@@ -247,10 +247,10 @@ static void local_read_cb(EV_P_ ev_io *w, int revents)
 
 	ev_io_stop(EV_A_ w);
 
-	conn->local_nbytes = recv(conn->sock_local, conn->out_buf, BUF_SIZE, 0);
-	if (conn->local_nbytes <=0)
+	conn->tx_bytes = recv(conn->sock_local, conn->tx_buf, BUF_SIZE, 0);
+	if (conn->tx_bytes <=0)
 	{
-		if (conn->local_nbytes < 0)
+		if (conn->tx_bytes < 0)
 		{
 			ERR("recv");
 		}
@@ -271,7 +271,7 @@ static void remote_write_cb(EV_P_ ev_io *w, int revents)
 
 	ev_io_stop(EV_A_ w);
 
-	ssize_t n = send(conn->sock_remote, conn->out_buf, conn->local_nbytes, MSG_NOSIGNAL);
+	ssize_t n = send(conn->sock_remote, conn->tx_buf, conn->tx_bytes, MSG_NOSIGNAL);
 	if (n < 0)
 	{
 		ERR("send");
@@ -292,10 +292,10 @@ static void remote_read_cb(EV_P_ ev_io *w, int revents)
 
 	ev_io_stop(EV_A_ w);
 
-	conn->remote_nbytes = recv(conn->sock_remote, conn->in_buf, BUF_SIZE, 0);
-	if (conn->remote_nbytes <=0)
+	conn->rx_bytes = recv(conn->sock_remote, conn->rx_buf, BUF_SIZE, 0);
+	if (conn->rx_bytes <=0)
 	{
-		if (conn->remote_nbytes < 0)
+		if (conn->rx_bytes < 0)
 		{
 			ERR("recv");
 		}
@@ -317,7 +317,7 @@ static void local_write_cb(EV_P_ ev_io *w, int revents)
 
 	ev_io_stop(EV_A_ w);
 
-	ssize_t n = send(conn->sock_local, conn->in_buf, conn->remote_nbytes, MSG_NOSIGNAL);
+	ssize_t n = send(conn->sock_local, conn->rx_buf, conn->rx_bytes, MSG_NOSIGNAL);
 	if (n < 0)
 	{
 		ERR("send");
