@@ -135,9 +135,9 @@ int main(int argc, char **argv)
 	}
 
 	// 初始化内存池
-	size_t block_size[2] = { sizeof(ev_io), sizeof(conncb_t) };
-	size_t block_count[2] = { 64, 32 };
-	if (!mem_init(block_size, block_count, 2))
+	size_t block_size[1] = { sizeof(conncb_t) };
+	size_t block_count[1] = { 64 };
+	if (!mem_init(block_size, block_count, 1))
 	{
 		LOG("memory pool error");
 		return 3;
@@ -205,28 +205,30 @@ static void accept_cb(EV_P_ ev_io *w, int revents)
 		mem_delete(conn);
 		return;
 	}
-	ev_io *w_connect = (ev_io *)mem_new(sizeof(ev_io));
-	if (w_connect == NULL)
-	{
-		close(conn->sock_local);
-		close(conn->sock_remote);
-		mem_delete(conn);
-		return;
-	}
-	ev_io_init(w_connect, connect_cb, conn->sock_remote, EV_WRITE);
-	w_connect->data = (void *)conn;
-	ev_io_start(EV_A_ w_connect);
+	ev_io_init(&conn->w_remote_write, connect_cb, conn->sock_remote, EV_WRITE);
+	conn->w_remote_write.data = (void *)conn;
+	ev_io_start(EV_A_ &conn->w_remote_write);
 	connect(conn->sock_remote, (struct sockaddr *)remote.addr, remote.addrlen);
 }
 
 static void connect_cb(EV_P_ ev_io *w, int revents)
 {
-	LOG("remote connection established");
+	ev_io_stop(EV_A_ w);
 
 	conncb_t *conn = (conncb_t *)(w->data);
+	int error = 0;
+	socklen_t len = sizeof(int);
 
-	ev_io_stop(EV_A_ w);
-	mem_delete(w);
+	getsockopt(w->fd, SOL_SOCKET, SO_ERROR, &error, &len);
+	if (error != 0)
+	{
+		__log(stderr, "connect: %s", strerror(error));
+		close(conn->sock_local);
+		close(conn->sock_remote);
+		mem_delete(conn);
+		return;
+	}
+	LOG("remote connection established");
 
 	ev_io_init(&conn->w_local_read, local_read_cb, conn->sock_local, EV_READ);
 	ev_io_init(&conn->w_local_write, local_write_cb, conn->sock_local, EV_WRITE);
@@ -243,10 +245,9 @@ static void connect_cb(EV_P_ ev_io *w, int revents)
 
 static void local_read_cb(EV_P_ ev_io *w, int revents)
 {
-	conncb_t *conn = (conncb_t *)(w->data);
-
 	ev_io_stop(EV_A_ w);
 
+	conncb_t *conn = (conncb_t *)(w->data);
 	conn->tx_bytes = recv(conn->sock_local, conn->tx_buf, BUF_SIZE, 0);
 	if (conn->tx_bytes <=0)
 	{
@@ -267,10 +268,9 @@ static void local_read_cb(EV_P_ ev_io *w, int revents)
 
 static void remote_write_cb(EV_P_ ev_io *w, int revents)
 {
-	conncb_t *conn = (conncb_t *)(w->data);
-
 	ev_io_stop(EV_A_ w);
 
+	conncb_t *conn = (conncb_t *)(w->data);
 	ssize_t n = send(conn->sock_remote, conn->tx_buf, conn->tx_bytes, MSG_NOSIGNAL);
 	if (n < 0)
 	{
@@ -288,10 +288,9 @@ static void remote_write_cb(EV_P_ ev_io *w, int revents)
 
 static void remote_read_cb(EV_P_ ev_io *w, int revents)
 {
-	conncb_t *conn = (conncb_t *)(w->data);
-
 	ev_io_stop(EV_A_ w);
 
+	conncb_t *conn = (conncb_t *)(w->data);
 	conn->rx_bytes = recv(conn->sock_remote, conn->rx_buf, BUF_SIZE, 0);
 	if (conn->rx_bytes <=0)
 	{
@@ -313,10 +312,9 @@ static void remote_read_cb(EV_P_ ev_io *w, int revents)
 
 static void local_write_cb(EV_P_ ev_io *w, int revents)
 {
-	conncb_t *conn = (conncb_t *)w->data;
-
 	ev_io_stop(EV_A_ w);
 
+	conncb_t *conn = (conncb_t *)w->data;
 	ssize_t n = send(conn->sock_local, conn->rx_buf, conn->rx_bytes, MSG_NOSIGNAL);
 	if (n < 0)
 	{
