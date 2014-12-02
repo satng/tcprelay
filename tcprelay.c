@@ -249,7 +249,7 @@ static void local_read_cb(EV_P_ ev_io *w, int revents)
 
 	conncb_t *conn = (conncb_t *)(w->data);
 	conn->tx_bytes = recv(conn->sock_local, conn->tx_buf, BUF_SIZE, 0);
-	if (conn->tx_bytes <=0)
+	if (conn->tx_bytes <= 0)
 	{
 		if (conn->tx_bytes < 0)
 		{
@@ -292,7 +292,7 @@ static void remote_read_cb(EV_P_ ev_io *w, int revents)
 
 	conncb_t *conn = (conncb_t *)(w->data);
 	conn->rx_bytes = recv(conn->sock_remote, conn->rx_buf, BUF_SIZE, 0);
-	if (conn->rx_bytes <=0)
+	if (conn->rx_bytes <= 0)
 	{
 		if (conn->rx_bytes < 0)
 		{
