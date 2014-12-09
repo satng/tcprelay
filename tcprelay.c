@@ -33,7 +33,7 @@
 #include "mem.h"
 
 // 缓冲区大小
-#define BUF_SIZE 65536
+#define BUF_SIZE 8192
 
 struct
 {
