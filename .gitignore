@@ -1,7 +1,14 @@
-# ignore build file
+.deps/
+/Makefile
+src/Makefile
+autom4te.cache/
+/config.h
+autoscan.log
+config.log
+config.status
 *.o
+*.tar.gz
 tcprelay
 
-# ignore Qt Creator project file
 *.pro
 *.pro.user
