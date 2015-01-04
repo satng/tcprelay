@@ -32,14 +32,14 @@ static struct
 	size_t size;
 	size_t count;
 	size_t used;
-	void **ptr;
+	void **state;
 } block[MEM_POOL_MAX];
 
-bool mem_init(size_t *block_size, size_t *block_count, size_t pool_count)
+int mem_init(size_t *block_size, size_t *block_count, size_t pool_count)
 {
 	if ((pool_count <= 0) || (pool_count > MEM_POOL_MAX))
 	{
-		return false;
+		return -1;
 	}
 	// 对 block_size 按升序排序
 	for (size_t i = 1; i < pool_count; i++)
@@ -66,28 +66,28 @@ bool mem_init(size_t *block_size, size_t *block_count, size_t pool_count)
 	void *pool = (void *)malloc(total);
 	if (pool == NULL)
 	{
-		return false;
+		return -1;
 	}
 	void *ptr = pool;
 	for (size_t i = 0; i < pool_count; i++)
 	{
-		block[i].ptr = (void **)malloc(sizeof(void *) * block_count[i]);
-		if (block[i].ptr == NULL)
+		block[i].state = (void **)malloc(sizeof(void *) * block_count[i]);
+		if (block[i].state == NULL)
 		{
 			free(pool);
 			for (size_t j = 0; j < i; j++)
 			{
-				free(block[i].ptr);
+				free(block[i].state);
 			}
-			return false;
+			return -1;
 		}
 		for (size_t j = 0; j < block[i].count; j++)
 		{
-			block[i].ptr[j] = ptr;
+			block[i].state[j] = ptr;
 			ptr += block[i].size;
 		}
 	}
-	return true;
+	return 0;
 }
 
 void *mem_new(size_t size)
@@ -101,7 +101,7 @@ void *mem_new(size_t size)
 	{
 		if ((block[i].size >= size) && (block[i].used < block[i].count))
 		{
-			return block[i].ptr[block[i].used++];
+			return block[i].state[block[i].used++];
 		}
 	}
 	return malloc(size);
@@ -118,13 +118,13 @@ void mem_delete(void *ptr)
 	{
 		for (size_t j = 0; j < block[i].used; j++)
 		{
-			if (block[i].ptr[j] == ptr)
+			if (block[i].state[j] == ptr)
 			{
 				for (size_t k = j; k < block[i].used - 1; k++)
 				{
-					block[i].ptr[k] = block[i].ptr[k + 1];
+					block[i].state[k] = block[i].state[k + 1];
 				}
-				block[i].ptr[--block[i].used] = ptr;
+				block[i].state[--block[i].used] = ptr;
 				return;
 			}
 		}
